@@ -72,8 +72,10 @@ jobs:
       - name: Testes (unitários, BDD e integração) com cobertura mínima de 80%
         run: npm run test:coverage
 
+      # O plano da organização no SonarCloud só libera resultados (e o Quality Gate)
+      # da branch principal. Por isso o Sonar roda só na main, dentro do CD, antes do deploy.
       - name: SonarCloud scan + Quality Gate
-        if: ${{ env.SONAR_TOKEN != '' }}
+        if: ${{ env.SONAR_TOKEN != '' && github.ref == 'refs/heads/main' }}
         uses: SonarSource/sonarqube-scan-action@v5
         env:
           SONAR_HOST_URL: https://sonarcloud.io
@@ -84,8 +86,13 @@ jobs:
             -Dsonar.qualitygate.timeout=300
 
       - name: Aviso - Sonar não executado
-        if: ${{ env.SONAR_TOKEN == '' }}
-        run: echo "::warning::SONAR_TOKEN não configurado; análise do SonarCloud ignorada"
+        if: ${{ env.SONAR_TOKEN == '' || github.ref != 'refs/heads/main' }}
+        run: |
+          if [ -z "$SONAR_TOKEN" ]; then
+            echo "::warning::SONAR_TOKEN não configurado; análise do SonarCloud ignorada"
+          else
+            echo "::notice::SonarCloud e Quality Gate rodam só na main (no CD, antes do deploy)"
+          fi
 
       - name: Build da imagem (sem push)
         run: docker build -t billing-service:ci .

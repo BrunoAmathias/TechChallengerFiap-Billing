@@ -82,7 +82,7 @@ O Mercado Pago é mockado com `nock` no nível HTTP, então o SDK real é exerci
 - ESLint (`npm run lint`);
 - testes unitários, BDD e de integração (Postgres de serviço no CI) com **cobertura mínima de 80%** em linhas, branches, funções e statements (`coverageThreshold` do `jest.config.js`);
 - cenários **BDD** em português (`tests/features/*.feature`, jest-cucumber), rodados junto com os demais testes;
-- **SonarCloud** (projeto `BrunoAmathias_TechChallengerFiap-Billing`) com `sonar.qualitygate.wait=true`: Quality Gate reprovado falha o job.
+- **SonarCloud** (projeto `BrunoAmathias_TechChallengerFiap-Billing`) com `sonar.qualitygate.wait=true`, **só na `main`** (dentro do CD, antes do deploy): o plano da organização no SonarCloud não libera resultados nem Quality Gate de outras branches. Quality Gate reprovado **impede o deploy**.
 
 ```bash
 npm run lint
@@ -107,7 +107,7 @@ O namespace `billing` e os Secrets `rabbitmq` e `service-auth` são criados pelo
 
 ### Proteção da branch main
 
-PR obrigatório com 1 aprovação, check `ci` obrigatório (inclui o Quality Gate do Sonar), sem push direto, sem force push. Configuração pela API do GitHub com o script do repo Application:
+PR obrigatório com 1 aprovação, check `ci` obrigatório (lint, testes e cobertura mínima de 80%; o Quality Gate do Sonar é verificado no CD, antes do deploy), sem push direto, sem force push. Configuração pela API do GitHub com o script do repo Application:
 
 ```bash
 export GH_TOKEN=<token com permissão de administração do repositório>
