@@ -1,17 +1,19 @@
 const { randomUUID } = require('node:crypto');
+const { capturarContextoTrace } = require('../../infrastructure/observability/tracing');
 
 const SOURCE = 'billing-service';
 
 /**
  * Monta o envelope padrão de todo evento da saga:
  * { eventId, type, version, occurredAt, correlationId (= osId), source, causationId, payload }
+ * + traceContext (opcional): cabeçalhos do trace distribuído do New Relic de quem gerou o evento.
  */
 function criarEvento(type, payload, { correlationId, causationId = null, version = 1 } = {}) {
   if (correlationId == null) {
     throw new Error(`correlationId é obrigatório no evento ${type}`);
   }
 
-  return {
+  const evento = {
     eventId: randomUUID(),
     type,
     version,
@@ -21,6 +23,13 @@ function criarEvento(type, payload, { correlationId, causationId = null, version
     causationId,
     payload
   };
+
+  const traceContext = capturarContextoTrace();
+  if (traceContext) {
+    evento.traceContext = traceContext;
+  }
+
+  return evento;
 }
 
 /** Valida o envelope recebido do broker antes de entregá-lo a um handler. */

@@ -1,6 +1,8 @@
+const newrelic = require("newrelic");
 const defaultLogger = require("../logger");
 const { runWithCorrelationId } = require("../logger");
-const { validarEnvelope } = require("../../application/events/eventFactory");
+const { validarEnvelope, SOURCE } = require("../../application/events/eventFactory");
+const { processarComTrace } = require("../observability/tracing");
 const { nomesDasFilas } = require("./topology");
 
 const RETRY_HEADER = "x-retry-count";
@@ -11,6 +13,8 @@ const RETRY_HEADER = "x-retry-count";
  * - erro no handler → reenvia para <fila>.retry (TTL) até `maxTentativas`
  * - tentativas esgotadas ou mensagem inválida → nack sem requeue (vai para a DLQ)
  * A idempotência fica nos handlers (processed_events na mesma transação).
+ * Cada evento vira uma transação no New Relic ligada ao trace de quem o publicou,
+ * e gera um evento customizado SagaEvento (processado, retry ou dlq).
  */
 class EventConsumer {
   constructor({ channel, queue, handlers, maxTentativas = 3, prefetch = 10, logger = defaultLogger }) {
@@ -49,28 +53,42 @@ class EventConsumer {
       return;
     }
 
-    await runWithCorrelationId(evento.correlationId, async () => {
-      const inicio = Date.now();
-      try {
-        const resultado = await handler(evento);
-        this.channel.ack(msg);
-        this.logger.info(
-          { eventId: evento.eventId, eventType: evento.type, resultado: resultado?.resultado, duracaoMs: Date.now() - inicio },
-          "Evento processado"
-        );
-      } catch (err) {
-        this.tratarFalha(msg, evento, err);
-      }
-    });
+    const tentativa = this.tentativaAtual(msg);
+
+    await processarComTrace(evento, { servico: SOURCE, fila: this.queue, tentativa }, () =>
+      runWithCorrelationId(evento.correlationId, async () => {
+        const inicio = Date.now();
+        try {
+          const resultado = await handler(evento);
+          this.channel.ack(msg);
+          const duracaoMs = Date.now() - inicio;
+          this.logger.info(
+            { eventId: evento.eventId, eventType: evento.type, resultado: resultado?.resultado, duracaoMs },
+            "Evento processado"
+          );
+          this.registrarSagaEvento(evento, "processado", tentativa, {
+            resultado: String(resultado?.resultado ?? "ok"),
+            duracaoMs
+          });
+        } catch (err) {
+          this.tratarFalha(msg, evento, err, tentativa);
+        }
+      })
+    );
   }
 
-  tratarFalha(msg, evento, err) {
-    const tentativa = Number(msg.properties.headers?.[RETRY_HEADER] ?? 0) + 1;
+  tentativaAtual(msg) {
+    return Number(msg.properties.headers?.[RETRY_HEADER] ?? 0) + 1;
+  }
+
+  tratarFalha(msg, evento, err, tentativa = this.tentativaAtual(msg)) {
     const contexto = { err, eventId: evento.eventId, eventType: evento.type, tentativa };
+    newrelic.noticeError(err, { eventId: evento.eventId, eventType: evento.type, tentativa });
 
     if (tentativa >= this.maxTentativas) {
       this.logger.error(contexto, "Tentativas esgotadas, evento enviado para a DLQ");
       this.channel.nack(msg, false, false);
+      this.registrarSagaEvento(evento, "dlq", tentativa, { erro: String(err.message).slice(0, 255) });
       return;
     }
 
@@ -88,6 +106,24 @@ class EventConsumer {
       }
     });
     this.channel.ack(msg);
+    this.registrarSagaEvento(evento, "retry", tentativa, { erro: String(err.message).slice(0, 255) });
+  }
+
+  /** Evento customizado do New Relic: uma linha por evento consumido (base do dashboard da saga). */
+  registrarSagaEvento(evento, status, tentativa, extras = {}) {
+    const ocorridoEm = Date.parse(evento.occurredAt);
+    newrelic.recordCustomEvent("SagaEvento", {
+      servico: SOURCE,
+      origem: String(evento.source ?? ""),
+      eventType: evento.type,
+      eventId: evento.eventId,
+      osId: String(evento.correlationId),
+      status,
+      tentativa,
+      // tempo entre o evento ser gerado (outbox) e terminar de ser consumido aqui
+      latenciaMs: Number.isNaN(ocorridoEm) ? 0 : Math.max(0, Date.now() - ocorridoEm),
+      ...extras
+    });
   }
 
   async stop() {

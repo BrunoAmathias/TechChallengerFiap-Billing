@@ -1,5 +1,6 @@
 const defaultLogger = require("../logger");
 const { EXCHANGE_EVENTS } = require("./topology");
+const { cabecalhosDoEvento } = require("../observability/tracing");
 
 /**
  * Transactional Outbox: faz polling da tabela outbox e publica os eventos
@@ -78,7 +79,8 @@ class OutboxPublisher {
           correlationId: String(evento.correlationId),
           type: evento.type,
           timestamp: Math.floor(Date.parse(evento.occurredAt) / 1000),
-          headers: { source: evento.source, version: evento.version }
+          // contexto do trace de quem gerou o evento: o consumidor continua o mesmo trace
+          headers: { source: evento.source, version: evento.version, ...cabecalhosDoEvento(evento) }
         },
         (err) => (err ? reject(err) : resolve())
       );
