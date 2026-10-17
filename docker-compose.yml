@@ -1,0 +1,61 @@
+# Ambiente local do Billing (Postgres próprio + RabbitMQ). O OS Service e o
+# Execution rodam nos próprios repositórios; com MERCADOPAGO_MODE=fake não é
+# preciso credencial do Mercado Pago.
+services:
+  db:
+    image: postgres:15
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+      POSTGRES_DB: billing_db
+    ports:
+      - "5434:5432"
+    volumes:
+      - billing_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d billing_db"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  rabbitmq:
+    image: rabbitmq:4.3-management
+    environment:
+      RABBITMQ_DEFAULT_USER: oficina
+      RABBITMQ_DEFAULT_PASS: ${RABBITMQ_PASSWORD:-oficina}
+    ports:
+      - "5672:5672"
+      - "15672:15672"
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "check_port_connectivity"]
+      interval: 10s
+      timeout: 10s
+      retries: 10
+
+  migrate:
+    build: .
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      DB_URL: postgresql://postgres:${POSTGRES_PASSWORD:-postgres}@db:5432/billing_db
+    command: npm run migrate:up
+
+  billing:
+    build: .
+    ports:
+      - "3001:3000"
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      rabbitmq:
+        condition: service_healthy
+    env_file:
+      - .env
+    environment:
+      DB_URL: postgresql://postgres:${POSTGRES_PASSWORD:-postgres}@db:5432/billing_db
+      DB_SSL: "false"
+      RABBITMQ_URL: amqp://oficina:${RABBITMQ_PASSWORD:-oficina}@rabbitmq:5672
+
+volumes:
+  billing_data:

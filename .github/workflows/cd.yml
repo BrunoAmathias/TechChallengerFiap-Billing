@@ -1,0 +1,129 @@
+name: CD - Billing Service (main)
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pull-requests: read
+
+concurrency:
+  group: cd-billing-production
+  cancel-in-progress: false
+
+env:
+  EKS_CLUSTER_NAME: techchallenge-dev
+  NAMESPACE: billing
+  DEPLOYMENT: billing-service
+  ECR_REPOSITORY: ${{ vars.ECR_REPOSITORY || 'billing-service' }}
+
+jobs:
+  # Mesmos testes, lint, cobertura e Sonar do CI antes de qualquer deploy
+  ci:
+    uses: ./.github/workflows/ci.yml
+    secrets: inherit
+
+  deploy:
+    name: Deploy no EKS
+    needs: ci
+    runs-on: ubuntu-latest
+    environment: production
+    timeout-minutes: 25
+
+    steps:
+      - name: Checkout código
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+
+      - name: Configurar credenciais AWS
+        uses: aws-actions/configure-aws-credentials@463133d79af6d001e45482f356e244208e65f0c5 # v6
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ secrets.AWS_REGION }}
+
+      - name: Login no Amazon ECR
+        id: ecr
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Build e push da imagem (tag = SHA do commit)
+        id: imagem
+        env:
+          REGISTRY: ${{ steps.ecr.outputs.registry }}
+        run: |
+          IMAGE="$REGISTRY/$ECR_REPOSITORY:${GITHUB_SHA}"
+          docker build -t "$IMAGE" -t "$REGISTRY/$ECR_REPOSITORY:latest" .
+          docker push "$IMAGE"
+          docker push "$REGISTRY/$ECR_REPOSITORY:latest"
+          echo "image=$IMAGE" >> "$GITHUB_OUTPUT"
+
+      - name: Configurar kubectl
+        run: |
+          aws eks update-kubeconfig --name "$EKS_CLUSTER_NAME" --region "${{ secrets.AWS_REGION }}"
+          # Namespace e Secrets rabbitmq/service-auth vêm do Terraform (repo TechChallengerFiap-K8s)
+          kubectl get namespace "$NAMESPACE"
+          kubectl -n "$NAMESPACE" get secret rabbitmq service-auth
+
+      - name: Criar/atualizar o Secret da aplicação
+        env:
+          DB_URL: ${{ secrets.DB_URL }}
+          JWT_SECRET: ${{ secrets.JWT_SECRET }}
+          APPROVAL_LINK_SECRET: ${{ secrets.APPROVAL_LINK_SECRET }}
+          PUBLIC_BASE_URL: ${{ secrets.PUBLIC_BASE_URL }}
+          MP_ACCESS_TOKEN: ${{ secrets.MP_ACCESS_TOKEN }}
+          MP_WEBHOOK_SECRET: ${{ secrets.MP_WEBHOOK_SECRET }}
+          NEW_RELIC_LICENSE_KEY: ${{ secrets.NEW_RELIC_LICENSE_KEY }}
+          SMTP_HOST: ${{ secrets.SMTP_HOST }}
+          SMTP_PORT: ${{ secrets.SMTP_PORT }}
+          SMTP_SECURE: ${{ secrets.SMTP_SECURE }}
+          SMTP_USER: ${{ secrets.SMTP_USER }}
+          SMTP_PASS: ${{ secrets.SMTP_PASS }}
+          SMTP_FROM: ${{ secrets.SMTP_FROM }}
+          # Ajustes de ambiente (GitHub Variables). Padrões seguros para produção.
+          MERCADOPAGO_MODE: ${{ vars.MERCADOPAGO_MODE || 'real' }}
+          MP_WEBHOOK_SIGNATURE: ${{ vars.MP_WEBHOOK_SIGNATURE || 'enforce' }}
+        run: |
+          set -euo pipefail
+          OBRIGATORIOS="DB_URL JWT_SECRET APPROVAL_LINK_SECRET PUBLIC_BASE_URL NEW_RELIC_LICENSE_KEY"
+          [ "$MERCADOPAGO_MODE" = "fake" ] || OBRIGATORIOS="$OBRIGATORIOS MP_ACCESS_TOKEN MP_WEBHOOK_SECRET"
+          for VAR in $OBRIGATORIOS; do
+            [ -n "${!VAR}" ] || { echo "::error::Secret $VAR não configurado"; exit 1; }
+          done
+
+          ARGS=()
+          for VAR in DB_URL JWT_SECRET APPROVAL_LINK_SECRET PUBLIC_BASE_URL MP_ACCESS_TOKEN MP_WEBHOOK_SECRET \
+                     NEW_RELIC_LICENSE_KEY SMTP_HOST SMTP_PORT SMTP_SECURE SMTP_USER SMTP_PASS SMTP_FROM \
+                     MERCADOPAGO_MODE MP_WEBHOOK_SIGNATURE; do
+            [ -n "${!VAR}" ] && ARGS+=("--from-literal=$VAR=${!VAR}")
+          done
+
+          kubectl -n "$NAMESPACE" create secret generic billing-secret "${ARGS[@]}" \
+            --dry-run=client -o yaml | kubectl apply -f -
+          echo "billing-secret com ${#ARGS[@]} chaves (MERCADOPAGO_MODE=$MERCADOPAGO_MODE, MP_WEBHOOK_SIGNATURE=$MP_WEBHOOK_SIGNATURE)"
+
+      - name: Aplicar manifests (Kustomize) com a imagem nova
+        env:
+          IMAGE: ${{ steps.imagem.outputs.image }}
+        run: |
+          kubectl kustomize k8s \
+            | sed "s#image: billing-service:latest#image: ${IMAGE}#" \
+            | kubectl apply -f -
+          # Secret alterado não reinicia os pods sozinho
+          kubectl -n "$NAMESPACE" rollout restart deployment/"$DEPLOYMENT"
+
+      - name: Aguardar rollout
+        run: kubectl -n "$NAMESPACE" rollout status deployment/"$DEPLOYMENT" --timeout=300s
+
+      - name: Smoke test (/health dentro do cluster)
+        run: |
+          kubectl -n "$NAMESPACE" exec deploy/"$DEPLOYMENT" -c billing -- \
+            node -e 'fetch("http://localhost:3000/health").then(r=>r.json()).then(j=>{console.log(j);if(j.status==="DOWN")process.exit(1)})'
+
+      - name: Diagnóstico em caso de falha
+        if: failure()
+        run: |
+          kubectl -n "$NAMESPACE" get pods -o wide || true
+          kubectl -n "$NAMESPACE" describe deployment "$DEPLOYMENT" || true
+          kubectl -n "$NAMESPACE" logs deploy/"$DEPLOYMENT" --all-containers --tail=100 || true
+          kubectl -n "$NAMESPACE" get events --sort-by=.metadata.creationTimestamp | tail -30 || true

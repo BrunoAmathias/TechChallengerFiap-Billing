@@ -1,0 +1,24 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: billing-config
+
+# Configuração não sensível. Os segredos (DB_URL, JWT_SECRET, credenciais do
+# Mercado Pago, SMTP) ficam no Secret billing-secret, gerado pelo cd.yml.
+data:
+  NODE_ENV: production
+  PORT: "3000"
+  DB_SSL: "true"
+  LOG_LEVEL: info
+  SERVICE_NAME: billing-service
+  MERCADOPAGO_MODE: real
+  MP_SANDBOX: "true"
+  MP_WEBHOOK_TOLERANCE_SECONDS: "600"
+  # enforce = assinatura inválida é recusada (401). "warn" só para sandbox com
+  # contas de teste do MP (sobrescrever no billing-secret, nunca aqui).
+  MP_WEBHOOK_SIGNATURE: enforce
+  # "painel" = não envia notification_url; o MP usa o webhook de Suas integrações
+  MP_NOTIFICATION_URL: painel
+  PAYMENT_EXPIRATION_MINUTES: "1440"
+  # API interna do OS Service pelo DNS do cluster
+  OS_SERVICE_URL: http://api-service.os.svc.cluster.local:3000

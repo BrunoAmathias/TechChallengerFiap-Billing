@@ -1,0 +1,40 @@
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: billing-ingress
+  annotations:
+    # Mesmo ALB dos outros serviços (group.name). group.order menor que o do
+    # OS Service (100, rota /), então estes paths são avaliados antes.
+    alb.ingress.kubernetes.io/group.name: oficina
+    alb.ingress.kubernetes.io/group.order: "10"
+    alb.ingress.kubernetes.io/scheme: internet-facing
+    alb.ingress.kubernetes.io/target-type: ip
+    alb.ingress.kubernetes.io/healthcheck-path: /health
+    alb.ingress.kubernetes.io/success-codes: "200"
+
+spec:
+  ingressClassName: alb
+  rules:
+    - http:
+        paths:
+          - path: /orcamentos
+            pathType: Prefix
+            backend:
+              service:
+                name: billing-service
+                port:
+                  number: 3000
+          - path: /pagamentos
+            pathType: Prefix
+            backend:
+              service:
+                name: billing-service
+                port:
+                  number: 3000
+          - path: /webhooks/mercadopago
+            pathType: Prefix
+            backend:
+              service:
+                name: billing-service
+                port:
+                  number: 3000
