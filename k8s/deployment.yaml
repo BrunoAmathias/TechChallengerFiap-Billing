@@ -1,0 +1,95 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: billing-service
+  labels:
+    app: billing-service
+
+spec:
+  replicas: 2
+
+  selector:
+    matchLabels:
+      app: billing-service
+
+  template:
+    metadata:
+      labels:
+        app: billing-service
+
+    spec:
+      # Migrations (node-pg-migrate, com advisory lock) antes da API subir
+      initContainers:
+        - name: migrate
+          image: billing-service
+          command: ["npm", "run", "migrate:up"]
+          env:
+            - name: DB_URL
+              valueFrom:
+                secretKeyRef:
+                  name: billing-secret
+                  key: DB_URL
+          resources:
+            requests:
+              cpu: "50m"
+              memory: "64Mi"
+            limits:
+              cpu: "250m"
+              memory: "256Mi"
+
+      containers:
+        - name: billing
+          image: billing-service
+
+          ports:
+            - containerPort: 3000
+
+          envFrom:
+            - configMapRef:
+                name: billing-config
+            # DB_URL, JWT_SECRET, APPROVAL_LINK_SECRET, PUBLIC_BASE_URL,
+            # MP_ACCESS_TOKEN, MP_WEBHOOK_SECRET, SMTP_*, NEW_RELIC_LICENSE_KEY
+            - secretRef:
+                name: billing-secret
+
+          env:
+            # Secrets criados pelo Terraform (repo TechChallengerFiap-K8s)
+            - name: RABBITMQ_URL
+              valueFrom:
+                secretKeyRef:
+                  name: rabbitmq
+                  key: RABBITMQ_URL
+
+            - name: SERVICE_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: service-auth
+                  key: SERVICE_TOKEN
+
+            - name: NEW_RELIC_APP_NAME
+              value: "oficina-billing"
+
+            - name: NEW_RELIC_DISTRIBUTED_TRACING_ENABLED
+              value: "true"
+
+          resources:
+            requests:
+              cpu: "100m"
+              memory: "128Mi"
+            limits:
+              cpu: "500m"
+              memory: "512Mi"
+
+          livenessProbe:
+            httpGet:
+              path: /health/live
+              port: 3000
+            initialDelaySeconds: 15
+            periodSeconds: 20
+
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 3000
+            initialDelaySeconds: 10
+            periodSeconds: 10

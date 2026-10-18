@@ -1,0 +1,48 @@
+{
+  "name": "techchallengerfiap-billing",
+  "version": "1.0.0",
+  "description": "Billing Service da oficina: orçamento, aprovação e pagamento (Mercado Pago)",
+  "main": "src/server.js",
+  "private": true,
+  "scripts": {
+    "start": "node src/server.js",
+    "dev": "nodemon --legacy-watch src/server.js",
+    "test": "jest",
+    "test:unit": "jest tests/unit",
+    "test:integration": "jest tests/integration --runInBand",
+    "test:coverage": "jest --coverage",
+    "migrate": "node-pg-migrate -m migrations -d DB_URL",
+    "migrate:up": "node-pg-migrate up -m migrations -d DB_URL",
+    "migrate:down": "node-pg-migrate down -m migrations -d DB_URL",
+    "migrate:create": "node-pg-migrate create -m migrations -j sql",
+    "lint": "eslint .",
+    "test:bdd": "jest tests/features"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "dependencies": {
+    "amqplib": "^2.2.0",
+    "dotenv": "^17.4.2",
+    "express": "^5.3.0",
+    "jsonwebtoken": "^9.0.3",
+    "mercadopago": "^2.13.0",
+    "newrelic": "^12.25.1",
+    "node-pg-migrate": "^7.9.1",
+    "nodemailer": "^7.0.13",
+    "pg": "^8.23.1",
+    "pino": "^10.4.0",
+    "swagger-jsdoc": "^6.3.0",
+    "swagger-ui-express": "^5.0.1"
+  },
+  "devDependencies": {
+    "@eslint/js": "^9.39.5",
+    "eslint": "^9.39.5",
+    "globals": "^16.5.0",
+    "jest": "^29.7.0",
+    "jest-cucumber": "^4.5.0",
+    "nock": "^14.0.17",
+    "nodemon": "^3.1.14",
+    "supertest": "^6.3.4"
+  }
+}
