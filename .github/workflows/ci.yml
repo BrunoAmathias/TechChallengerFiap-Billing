@@ -1,0 +1,98 @@
+name: CI - Billing Service
+
+on:
+  pull_request:
+    branches: [Dev, Homolog, main]
+  push:
+    # main fica de fora: lá o CI roda dentro do CD (workflow_call)
+    branches: [Dev, Homolog]
+  workflow_call:
+    secrets:
+      SONAR_TOKEN:
+        required: false
+
+permissions:
+  contents: read
+  pull-requests: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  ci:
+    # Nome usado como status check obrigatório na proteção da branch main
+    name: ci
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    services:
+      postgres:
+        image: postgres:15
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: billing_db
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd="pg_isready -U postgres -d billing_db"
+          --health-interval=5s
+          --health-timeout=5s
+          --health-retries=20
+
+    env:
+      DB_URL: postgresql://postgres:postgres@localhost:5432/billing_db
+      DB_SSL: "false"
+      JWT_SECRET: ci-jwt-secret
+      NEW_RELIC_ENABLED: "false"
+      SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+
+    steps:
+      - name: Checkout código
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          fetch-depth: 0 # histórico completo para o Sonar calcular "new code"
+
+      - name: Setup Node.js 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Instalar dependências
+        run: npm ci
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Migrations (Postgres do CI)
+        run: npm run migrate:up
+
+      - name: Testes (unitários, BDD e integração) com cobertura mínima de 80%
+        run: npm run test:coverage
+
+      # O plano da organização no SonarCloud só libera resultados (e o Quality Gate)
+      # da branch principal. Por isso o Sonar roda só na main, dentro do CD, antes do deploy.
+      - name: SonarCloud scan + Quality Gate
+        if: ${{ env.SONAR_TOKEN != '' && github.ref == 'refs/heads/main' }}
+        uses: SonarSource/sonarqube-scan-action@v5
+        env:
+          SONAR_HOST_URL: https://sonarcloud.io
+        with:
+          # Espera o resultado do Quality Gate e falha o job se ele reprovar
+          args: >
+            -Dsonar.qualitygate.wait=true
+            -Dsonar.qualitygate.timeout=300
+
+      - name: Aviso - Sonar não executado
+        if: ${{ env.SONAR_TOKEN == '' || github.ref != 'refs/heads/main' }}
+        run: |
+          if [ -z "$SONAR_TOKEN" ]; then
+            echo "::warning::SONAR_TOKEN não configurado; análise do SonarCloud ignorada"
+          else
+            echo "::notice::SonarCloud e Quality Gate rodam só na main (no CD, antes do deploy)"
+          fi
+
+      - name: Build da imagem (sem push)
+        run: docker build -t billing-service:ci .

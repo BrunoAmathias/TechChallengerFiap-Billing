@@ -1,0 +1,16 @@
+node_modules
+coverage
+.scannerwork
+.env
+.env.*
+*.log
+k8s
+tests
+Dockerfile
+docker-compose.yml
+sonar-project.properties
+.git
+.gitignore
+docs
+README.md
+.env.example
