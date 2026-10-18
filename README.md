@@ -7,6 +7,8 @@ Microsserviço de **orçamento, aprovação e pagamento** da oficina. Faz parte 
 | Banco | PostgreSQL (Neon, database `billing_db`), só deste serviço |
 | Mensageria | RabbitMQ: consome `os.aberta` e `execucao.falhou`; publica `orcamento.*` e `pagamento.*` |
 | Stack | Node 20, Express 5, pg, node-pg-migrate, amqplib, mercadopago v2, nodemailer, pino, New Relic, Jest |
+| Observabilidade | New Relic (`oficina-billing`): trace distribuído pela saga, evento `SagaEvento` por evento consumido e logs ligados ao trace ([detalhes](https://github.com/BrunoAmathias/TechChallengerFiap-Application/blob/Dev/docs/observabilidade.md)) |
+| Documentação geral | Visão do sistema, arquitetura e ADRs no [repo Application](https://github.com/BrunoAmathias/TechChallengerFiap-Application/blob/Dev/README.md) |
 
 ## Responsabilidades
 
@@ -105,16 +107,14 @@ DB_URL=postgresql://... npm run migrate:up && npm run test:coverage   # todos os
 
 O namespace `billing` e os Secrets `rabbitmq` e `service-auth` são criados pelo Terraform do repo `TechChallengerFiap-K8s`; o CD só confere que existem.
 
-### Proteção da branch main
+### Proteção das branches main e Homolog
 
-PR obrigatório com 1 aprovação, check `ci` obrigatório (lint, testes e cobertura mínima de 80%; o Quality Gate do Sonar é verificado no CD, antes do deploy), sem push direto, sem force push. Configuração pela API do GitHub com o script do repo Application:
+Ruleset "Main" do GitHub nas branches `main` e `Homolog`: PR obrigatório, check `ci` obrigatório e com a branch atualizada (lint, testes e cobertura mínima de 80%; o Quality Gate do Sonar é verificado no CD, antes do deploy), sem push direto, force push ou exclusão. A configuração é feita pelo script do repo Application, com um token de administração do repositório:
 
 ```bash
-export GH_TOKEN=<token com permissão de administração do repositório>
+export GH_TOKEN=<token fine-grained com "Administration: Read and write">
 ./scripts/proteger-branch-main.sh BrunoAmathias/TechChallengerFiap-Billing
 ```
-
-O check `ci` só aparece para seleção depois da primeira execução do workflow (abra um PR antes).
 
 ## Deploy
 
