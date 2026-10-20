@@ -52,7 +52,7 @@ class RabbitConnection extends EventEmitter {
 
     this.reconnectTimer = setTimeout(() => {
       this.reconnectTimer = null;
-      this.connect();
+      void this.connect(); // connect() trata os próprios erros
     }, this.reconnectDelayMs);
     this.reconnectTimer.unref?.();
   }

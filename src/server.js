@@ -7,6 +7,7 @@ const logger = require('./infrastructure/logger');
 const correlationIdMiddleware = require('./interfaces/middlewares/correlationId.middleware');
 
 const app = express();
+app.disable("x-powered-by"); // não expõe a tecnologia do servidor no header X-Powered-By
 
 app.use(correlationIdMiddleware);
 app.use(express.json());
