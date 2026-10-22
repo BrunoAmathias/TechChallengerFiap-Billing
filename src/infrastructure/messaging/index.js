@@ -44,7 +44,7 @@ function iniciarMensageria({
     logger
   });
 
-  connection.connect();
+  void connection.connect(); // connect() trata os próprios erros e agenda a reconexão
   publisher.start();
 
   return {
