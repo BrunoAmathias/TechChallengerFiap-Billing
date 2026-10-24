@@ -83,6 +83,9 @@ jobs:
           # Ajustes de ambiente (GitHub Variables). Padrões seguros para produção.
           MERCADOPAGO_MODE: ${{ vars.MERCADOPAGO_MODE || 'real' }}
           MP_WEBHOOK_SIGNATURE: ${{ vars.MP_WEBHOOK_SIGNATURE || 'enforce' }}
+          # Vazio = mantém o "painel" do ConfigMap. Em sandbox, a URL do webhook enviada em
+          # cada preferência (as contas de teste não disparam o webhook do painel)
+          MP_NOTIFICATION_URL: ${{ vars.MP_NOTIFICATION_URL }}
         run: |
           set -euo pipefail
           OBRIGATORIOS="DB_URL JWT_SECRET APPROVAL_LINK_SECRET PUBLIC_BASE_URL NEW_RELIC_LICENSE_KEY"
@@ -94,7 +97,7 @@ jobs:
           ARGS=()
           for VAR in DB_URL JWT_SECRET APPROVAL_LINK_SECRET PUBLIC_BASE_URL MP_ACCESS_TOKEN MP_WEBHOOK_SECRET \
                      NEW_RELIC_LICENSE_KEY SMTP_HOST SMTP_PORT SMTP_SECURE SMTP_USER SMTP_PASS SMTP_FROM \
-                     MERCADOPAGO_MODE MP_WEBHOOK_SIGNATURE; do
+                     MERCADOPAGO_MODE MP_WEBHOOK_SIGNATURE MP_NOTIFICATION_URL; do
             [ -n "${!VAR}" ] && ARGS+=("--from-literal=$VAR=${!VAR}")
           done
 

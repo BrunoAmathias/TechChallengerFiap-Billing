@@ -121,6 +121,7 @@ Resultado de `npm run test:coverage` (todos os testes: unitários, BDD e integra
 | `ECR_REPOSITORY` | variable (opcional) | padrão `billing-service` |
 | `MERCADOPAGO_MODE` | variable (opcional) | `real` (padrão) ou `fake` |
 | `MP_WEBHOOK_SIGNATURE` | variable (opcional) | `enforce` (padrão, produção) ou `warn` (só sandbox com contas de teste do MP; ver `docs/eventos.md`) |
+| `MP_NOTIFICATION_URL` | variable (opcional) | vazio = `painel` (webhook de Suas integrações). Em sandbox, `https://<url pública>/webhooks/mercadopago`: a URL vai em cada preferência, porque as contas de teste não disparam o webhook do painel |
 
 O namespace `billing` e os Secrets `rabbitmq` e `service-auth` são criados pelo Terraform do repo `TechChallengerFiap-K8s`; o CD só confere que existem.
 
